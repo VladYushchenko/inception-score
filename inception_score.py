@@ -13,13 +13,14 @@ import time
 import functools
 import os
 import argparse
-import glob
 import tensorflow as tf
 import numpy as np
-from PIL import Image
-from random import shuffle
+from tqdm import tqdm
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import functional_ops
+import torchvision.transforms as transforms
+import torchvision.datasets as dataset
+import torch.utils.data
 
 def inception_logits(images, num_splits=1):
     """Run images through Inception"""
@@ -37,13 +38,13 @@ def inception_logits(images, num_splits=1):
     logits = array_ops.concat(array_ops.unstack(logits), 0)
     return logits
 
-def get_inception_probs(inps, batch_size):
+def get_inception_probs(loader):
     preds = []
-    n_batches = len(inps) // batch_size
+    batch_size = loader.batch_size
     inception_images = tf.placeholder(tf.float32, [batch_size, 3, None, None])
     logits = inception_logits(inception_images)
-    for i in range(n_batches):
-        inp = inps[i * batch_size:(i + 1) * batch_size]
+    for batch_id, (inp, _) in tqdm(enumerate(loader), total=len(loader)):
+        inp = inp.data.numpy()
         pred = logits.eval({inception_images: inp})[:, :1000]
         preds.append(pred)
     preds = np.concatenate(preds, 0)
@@ -59,16 +60,10 @@ def preds2score(preds,splits):
         scores.append(np.exp(kl))
     return np.mean(scores), np.std(scores)
 
-def get_inception_score(images, batch_size=16, splits=10):
-    assert(type(images) == np.ndarray)
-    assert(len(images.shape) == 4)
-    assert(images.shape[1] == 3)
-    assert(np.max(images[0]) <= 1)
-    assert(np.min(images[0]) >= -1)
-
+def get_inception_score(loader, splits=10):
     start_time = time.time()
     session = tf.InteractiveSession()
-    preds = get_inception_probs(images, batch_size)
+    preds = get_inception_probs(loader)
     print('Inception Score for %i samples in %i splits'% (preds.shape[0], splits))
     mean, std = preds2score(preds,splits)
     print('Inception Score calculation time: %f s'%(time.time()-start_time))
@@ -88,24 +83,15 @@ if __name__ == '__main__':
     if not args.splits:
         args.splits = len(os.listdir(args.data_root))
 
-    images_path_list = glob.glob(args.data_root + '/**/*.{}'.format(args.ext), recursive=True)
+    transform = transforms.Compose([
+        transforms.Resize(299),
+        transforms.CenterCrop(299),
+        transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    ])
 
-    def transform(image):
-        image = image / 255
-        return np.asarray((image - 0.5) * 2).transpose((2, 0, 1))
+    images = dataset.ImageFolder(root=args.data_root, transform=transform)
+    dataloader = torch.utils.data.DataLoader(images, batch_size=args.batch_size, num_workers=2, shuffle=True)
 
-    shuffle(images_path_list)
-    print(images_path_list[:20])
-
-    images = [transform(np.array(Image.open(image_path).convert('RGB'), dtype=np.float32))
-              for image_path in images_path_list]
-
-    images = np.stack(images)
-
-    print(np.mean(images, axis=(0, 2, 3)))
-    print(np.std(images, axis=(0, 2, 3)))
-    print(np.max(images))
-    print(np.min(images))
-    print(images.shape)
-    score = get_inception_score(images, args.batch_size, args.splits)
+    score = get_inception_score(dataloader, args.splits)
     print(score)
