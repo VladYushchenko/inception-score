@@ -91,7 +91,8 @@ if __name__ == '__main__':
     ])
 
     images = dataset.ImageFolder(root=args.data_root, transform=transform)
-    dataloader = torch.utils.data.DataLoader(images, batch_size=args.batch_size, num_workers=2, shuffle=True)
+    dataloader = torch.utils.data.DataLoader(images, batch_size=args.batch_size,
+                                             num_workers=2, shuffle=True, drop_last=True)
 
     score = get_inception_score(dataloader, args.splits)
     print(score)
