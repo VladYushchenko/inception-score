@@ -24,17 +24,24 @@ import torch.utils.data
 
 def inception_logits(images, num_splits=1):
     """Run images through Inception"""
-    images=tf.transpose(images, [0, 2, 3, 1])
+    file_dir = os.path.dirname(os.path.realpath(__file__))
+    inception_path = os.path.join(file_dir, 'frozen_inception_v1_2015_12_05.tar.gz')
+    images = tf.transpose(images, [0, 2, 3, 1])
     size = 299
     images = tf.image.resize_bilinear(images, [size, size])
     generated_images_list = array_ops.split(images, num_or_size_splits=num_splits)
-    logits = functional_ops.map_fn(
-        fn=functools.partial(tf.contrib.gan.eval.run_inception, output_tensor='logits:0'),
-        elems=array_ops.stack(generated_images_list),
-        parallel_iterations=1,
-        back_prop=False,
-        swap_memory=True,
-        name='RunClassifier')
+
+    INCEPTION_URL = 'http://download.tensorflow.org/models/frozen_inception_v1_2015_12_05.tar.gz'
+    INCEPTION_FROZEN_GRAPH = 'inceptionv1_for_inception_score.pb'
+    model_graph = tf.contrib.gan.eval.get_graph_def_from_url_tarball(
+        INCEPTION_URL, INCEPTION_FROZEN_GRAPH, inception_path)
+
+    fn = functools.partial(tf.contrib.gan.eval.run_inception,
+                           output_tensor='logits:0',
+                           graph_def=model_graph)
+    logits = functional_ops.map_fn(fn=fn, elems=array_ops.stack(generated_images_list),
+                                   parallel_iterations=1, back_prop=False,
+                                   swap_memory=True, name='RunClassifier')
     logits = array_ops.concat(array_ops.unstack(logits), 0)
     return logits
 
